@@ -55,7 +55,7 @@ if(@ARGV > 0 && @ARGV <= 3)
         $fileArg = $ARGV[3];
     }
 
-    if($fileArg != undef)
+    if(defined $fileArg)
     {
         print MakeLdifFile($fileArg);
     }
@@ -85,10 +85,10 @@ sub MakeLdifFile
         open(my $LDIF_FILE, '>', $ldifFile);
 
         # Generate a random password and store it for use.
-        my $randPass = CreateRandPass;
+        my $randPass = CreateRandPass();
 
         # Make a salt
-        my $salt = CreateRandPass;
+        my $salt = CreateRandPass();
         
         chomp;
         ($userID, $groupID, $userName, $cName, $shell, $email) = split(',');
@@ -115,8 +115,8 @@ sub MakeLdifFile
             homeDirectory: /ldapusers/$userName\n";
     }
 
-    close($USERS_FILE);
-    close($LDIF_FILE);
+    #close($USERS_FILE);
+    #close($LDIF_FILE);
 
     return $ldifFile;
 }
