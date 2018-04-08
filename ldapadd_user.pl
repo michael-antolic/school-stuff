@@ -5,6 +5,9 @@
 # Due: Wednesday, April 11th, 2018
 #
 # Purpose: Perl script to automatically add users from a file to an LDAP server.
+#
+# NOTE: To change the distinguished name, just change the values of the
+# variables $ou, $dName, and $admin as neccessary.
 
 use strict;
 use warnings;
@@ -27,9 +30,11 @@ my $userPassword;
 my $givenName;
 my $sName;
 
-# Variables for LDAP add commands.
+# Variables for LDAP add commands and distinguished name.
 my $ldapPassword;
-my $admin = "cn=admin,dc=cst202,dc=edu";
+my $ou = "ou=People";
+my $dName = "dc=cst202,dc=edu";
+my $admin = "cn=admin,$dName";
 
 if(@ARGV > 0 && @ARGV <= 4)
 {
@@ -56,6 +61,7 @@ if(@ARGV > 0 && @ARGV <= 4)
     {
         $dryRunSwitch = $ARGV[0];
         $fileArg = $ARGV[1];
+        $ldapPassword = "secret";
     }
     
     # Else, if there's 3 args (The -p switch, the actual password, and the file),
@@ -69,7 +75,7 @@ if(@ARGV > 0 && @ARGV <= 4)
     }
     
     # Else, if  there's 3 args (-p, -d, and the file),
-    # ten same as above, but with the default password.
+    # then same as above, but with the default password.
     elsif(@ARGV == 3 && $ARGV[1] eq "-p" && $ARGV[1] eq "-d")
     {
         $passwordSwitch = $ARGV[0];
@@ -87,6 +93,8 @@ if(@ARGV > 0 && @ARGV <= 4)
         $fileArg = $ARGV[3];
         $ldapPassword = $passwordArg;
     }
+
+    # Else, die and let the user know what they did wrong.
     else
     {
         die "Invalid arguments entered. 
@@ -94,20 +102,31 @@ if(@ARGV > 0 && @ARGV <= 4)
         File must be the last argument."
     }
 
+    # If there is a file
     if(defined $fileArg)
     {
+        # If the dry-run switch is set.
         if($dryRunSwitch eq "-d")
         {
+            # Do a dry-run of the script to show what would happen
+            # if the user ran the script for real.
             print "Dry-run, displaying ldif files:\n";
+
+            # Save the output of the MakeLdifFile sub in an array.
             my @ldifs = MakeLdifFile($fileArg);
+
+            # For each file in the array, print out the filename.
             foreach(@ldifs)
             {
                 print;
                 print "\n";
             }
 
+            # Make some whitespace.
             print "\n";
             print "\n";
+
+            # Display the ldapadd command that would be used in a real-life run.
             print "Dry-run, displaying ldapadd commands instead of running them:\n";
             foreach(@ldifs)
             {
@@ -115,9 +134,16 @@ if(@ARGV > 0 && @ARGV <= 4)
             }
 
         }
+
+        # Else, if it's not a dry run,
+        # run the script for real.
         else
         {
+            # Save the output of the MakeLdifFile sub in an array.
             my @ldifs = MakeLdifFile($fileArg);
+
+            # For each file, fork and exec the ldapadd command
+            # to add a user to ldap.
             foreach(@ldifs)
             {
                 my $isForked;
@@ -130,11 +156,17 @@ if(@ARGV > 0 && @ARGV <= 4)
         }
         
     }
+
+    # Else, if no file is provided by the user, 
+    # die and tell the user to add a file.
     else
     {
         die "Please specify a file to read users from.";
     }
 }
+
+# Else, if no or too many arguments are supplied,
+# die and notify the user.
 else
 {
     die "Invalid number of arguments entered.";
@@ -145,7 +177,10 @@ else
 # Takes in a file variable as an argument.
 sub MakeLdifFile
 {
+    # Counter for the while loop
     my $counter = 0;
+
+    # AN empty array to store ldif files.
     my @ldifFileAray;
 
     # Open a file handle that contains the user-specified file.
@@ -178,7 +213,7 @@ sub MakeLdifFile
         open(my $LDIF_FILE, '>', $ldifFile);
 
         # Print out an ldif-formatted string to a file.
-        print $LDIF_FILE "dn: uid=$userName,ou=People,dc=cst202,dc=edu
+        print $LDIF_FILE "dn: uid=$userName,$ou,$dName
             uid: $userName
             cn: $cName
             givenName: $givenName
@@ -196,8 +231,10 @@ sub MakeLdifFile
             gidNumber: $groupID
             homeDirectory: /ldapusers/$userName";
 
+            # Add the ldif file to an array
             push(@ldifFileAray, $ldifFile);
 
+            # Close the LDIF_FILE file handle.
             close($LDIF_FILE);
 
         last if($counter > $USERS_FILE);
