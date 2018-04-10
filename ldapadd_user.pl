@@ -18,6 +18,7 @@ my $fileArg;
 my $passwordSwitch;
 my $passwordArg;
 my $dryRunSwitch;
+my $helpSwitch;
 
 # Variables to hold each value in the passed-in file.
 my $userID;
@@ -40,15 +41,25 @@ if(@ARGV > 0 && @ARGV <= 4)
 {
     # Check which argument the file is passed in as.
 
-    # If there's only one arg, then look for the file there.
-    if(@ARGV == 1)
+    # If there's only one arg, and it's not -h or --help, then look for the file there.
+    if(@ARGV == 1 && $ARGV[0] ne "-h" || @ARGV == 1 && $ARGV[0] ne "--help")
     {
         $fileArg = $ARGV[0];
     }
 
+    elsif(@ARGV == 1 && $ARGV[0] eq "-h" || @ARGV == 1 && $ARGV[0] eq "--help")
+    {
+        $helpSwitch = $ARGV[0];
+        print "Usage: ./ldapadd_user [OPTION]... FILE...\n
+        Perl script to automatically add users from a csv (FILE) to an LDAP server.\n
+        Options must be specified before the file.\n
+        -p=[PASSWORD]       specifies a password for the LDAP admin. Default is 'secret'.\n
+        -d      Do a dry run - print out the ldifs and the ldapadd commands, but do not run them and do not create any directories.\n";
+    }
+
     # Else if there's 2 args and one of them is the password switch,
     # check that the other arg is the file.
-    elsif(@ARGV == 2 && $ARGV[0] eq "-p" && $ARGV[0] eq "-d")
+    elsif(@ARGV == 2 && $ARGV[0] eq "-p" && $ARGV[1] eq "-d")
     {
          $passwordSwitch = $ARGV[0];
          $fileArg = $ARGV[1];
@@ -76,7 +87,7 @@ if(@ARGV > 0 && @ARGV <= 4)
     
     # Else, if  there's 3 args (-p, -d, and the file),
     # then same as above, but with the default password.
-    elsif(@ARGV == 3 && $ARGV[1] eq "-p" && $ARGV[1] eq "-d")
+    elsif(@ARGV == 3 && $ARGV[0] eq "-p" && $ARGV[1] eq "-d")
     {
         $passwordSwitch = $ARGV[0];
         $dryRunSwitch = $ARGV[1];
@@ -97,16 +108,15 @@ if(@ARGV > 0 && @ARGV <= 4)
     # Else, die and let the user know what they did wrong.
     else
     {
-        die "Invalid arguments entered. 
-        Please only use the -p switch (with an otional password arg), and/or the -d switch, in that order.
-        File must be the last argument."
+        die "Invalid arguments entered.\n 
+        For usage notes, please type -h or --help after the command."
     }
 
     # If there is a file
     if(defined $fileArg)
     {
         # If the dry-run switch is set.
-        if($dryRunSwitch eq "-d")
+        if(defined($dryRunSwitch) && $dryRunSwitch eq "-d")
         {
             # Do a dry-run of the script to show what would happen
             # if the user ran the script for real.
@@ -114,6 +124,9 @@ if(@ARGV > 0 && @ARGV <= 4)
 
             # Save the output of the MakeLdifFile sub in an array.
             my @ldifs = MakeLdifFile($fileArg);
+
+            # Make a loop counter for indexing the array
+            my $i = 0;
 
             # For each file in the array, print out the filename.
             foreach(@ldifs)
@@ -130,9 +143,9 @@ if(@ARGV > 0 && @ARGV <= 4)
             print "Dry-run, displaying ldapadd commands instead of running them:\n";
             foreach(@ldifs)
             {
-                print "ldapadd -x,-D $admin -w $ldapPassword -f @ldifs\n";
+                print "ldapadd -x,-D $admin -w $ldapPassword -f $ldifs[$i]\n";
+                $i++;
             }
-
         }
 
         # Else, if it's not a dry run,
@@ -142,19 +155,47 @@ if(@ARGV > 0 && @ARGV <= 4)
             # Save the output of the MakeLdifFile sub in an array.
             my @ldifs = MakeLdifFile($fileArg);
 
+            # Make a loop counter for indexing the array
+            my $i = 0;
+
             # For each file, fork and exec the ldapadd command
             # to add a user to ldap.
             foreach(@ldifs)
             {
+                # Variable to hold if current processes is forked.
                 my $isForked;
 
                 if(!($isForked = fork))
                 {
-                    exec ("ldapadd -x,-D $admin -w $ldapPassword -f @ldifs");
+                    exec ("ldapadd -x,-D $admin -w $ldapPassword -f $ldifs[$i]");
                 }
+
+                #####################################################
+                wait;
+
+                if(!$?)
+                {
+                    print "Failed to run $?.";
+                }
+                else
+                {
+                    print "Successfully ran $?!";
+                }
+                
+
+                # Unlink the ldif files (in other words, delete them.)
+                unlink  $ldifs[$i];
+
+                # Increment the loop counter
+                $i++;
             }
         }
         
+    }
+
+    elsif (!(defined($fileArg)) && defined($helpSwitch))
+    {
+        print "test";
     }
 
     # Else, if no file is provided by the user, 
@@ -203,8 +244,31 @@ sub MakeLdifFile
         ($userID, $groupID, $userName, $cName, $shell, $email) = split(',');
         $userPassword = `openssl passwd -1 salt "$salt" "$randPass"`;
 
-        # Assign theuser a givenName and sName based on their first and last names.
-        ($givenName, $sName) = split("", $cName);
+        # Assign the user a givenName and sName based on their first and last names.
+        ($givenName, $sName) = split(" ", $cName);
+
+        # If the user has no last name,
+        # use an empty string
+        if (!defined $sName)
+        {
+            $sName = " ";
+        }
+
+        # Check if /ldapusers exists.
+        # If not, then create it.
+        if(!(-d "/ldapusers") && !defined($dryRunSwitch))
+        {
+            `mkdir /ldapusers`;
+        }
+
+        # Check if the user being parsed to an ldif has a home directory.
+        # If not, then create it by copying the skel directory
+        # and re-naming the directory after the user's userName.
+        # Also, chown the directory based on userID and groupID.
+        if(!defined($dryRunSwitch) && !(-d "/ldapusers/$userName"))
+        {
+            `cp /etc/skel /ldapusers/$userName; chown -R $userID:$groupID /ldapusers/$userName`;
+        }
 
         # Name the ldif file after the associated user.        
         $ldifFile = "$userName.ldif";
@@ -236,13 +300,16 @@ sub MakeLdifFile
 
             # Close the LDIF_FILE file handle.
             close($LDIF_FILE);
-
+        
+        # Break the loop when the counter is greater than the number of user files.
         last if($counter > $USERS_FILE);
 
     }
 
+    # Close the USERS_FILE filehandle.
     close($USERS_FILE);
     
+    # Return the array of ldif files
     return @ldifFileAray;
 }
 
